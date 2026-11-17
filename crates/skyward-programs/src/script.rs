@@ -96,6 +96,11 @@ pub fn read(text: &str) -> Result<Script> {
     let mut section = Section::None;
     for (number, words) in lines(text)? {
         let Some(first) = words.first() else { continue };
+        // Some vendor scripts comment whole lines out with //, which init's
+        // own reader does not, and which changes nothing here.
+        if first.starts_with("//") {
+            continue;
+        }
         match first.as_str() {
             "import" => {
                 ensure!(words.len() == 2, "line {number}: an import names one script");
@@ -155,6 +160,21 @@ fn lines(text: &str) -> Result<Vec<(usize, Vec<String>)>> {
             ' ' | '\t' | '\r' => words.extend(word.take()),
             '#' if word.is_none() => {
                 while chars.next_if(|&c| c != '\n').is_some() {}
+            }
+            '/' if word.is_none() && chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut prev = '\0';
+                loop {
+                    let c = chars.next().with_context(|| format!("line {began}: a comment is not closed"))?;
+                    if c == '\n' {
+                        number += 1;
+                    }
+                    if prev == '*' && c == '/' {
+                        break;
+                    }
+                    prev = c;
+                }
+                began = number;
             }
             '"' => {
                 let quoted = word.get_or_insert_with(String::new);
