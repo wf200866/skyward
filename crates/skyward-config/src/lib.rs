@@ -575,13 +575,25 @@ impl DeviceConfig {
             }
         }
         if let Some(stock) = &cfg.stock {
-            let name = stock.package.rsplit('/').next().unwrap_or_default();
-            ensure!(
-                stock.package.starts_with("https://") && name.ends_with(".zip") && name.contains(&stock.version) && !stock.version.is_empty(),
-                "[stock] package: {} is not an HTTPS address of the full package of {}",
-                stock.package,
-                stock.version
-            );
+            // A recovery image at hand is named by `path`, and its own sum is
+            // held against the configuration; the package beside it, when one
+            // is named too, is only what the image was taken out of.
+            match &stock.path {
+                Some(path) => {
+                    let at = Path::new(path);
+                    let plain = at.components().all(|c| matches!(c, std::path::Component::Normal(_)));
+                    ensure!(!path.is_empty() && plain && at.file_name().is_some(), "[stock] path: {path} is not a plain file name");
+                }
+                None => {
+                    let name = stock.package.rsplit('/').next().unwrap_or_default();
+                    ensure!(
+                        stock.package.starts_with("https://") && name.ends_with(".zip") && name.contains(&stock.version) && !stock.version.is_empty(),
+                        "[stock] package: {} is not an HTTPS address of the full package of {}",
+                        stock.package,
+                        stock.version
+                    );
+                }
+            }
             ensure!(
                 stock.recovery.len() == 64 && stock.recovery.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
                 "[stock] recovery: {} is not a SHA-256 in lowercase hex",
