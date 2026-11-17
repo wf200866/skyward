@@ -56,7 +56,21 @@ impl Haptics {
     /// only as it is played.
     pub fn open(cfg: &skyward_config::Haptics) -> Result<Haptics> {
         let (path, dev) = motor()?;
-        let hz = resonance(&cfg.resonance)?;
+        let hz = match resonance(&cfg.resonance) {
+            Ok(hz) => hz,
+            Err(first) => match &cfg.period {
+                // Some drivers, OnePlus's among them, leave the frequency at
+                // nothing until the motor is first played, and say the
+                // period instead.
+                Some(file) => {
+                    let text = fs::read_to_string(file).with_context(|| format!("read {file}"))?;
+                    let us: u32 = text.split_whitespace().next().and_then(|n| n.parse().ok()).with_context(|| format!("{file} holds {text:?}"))?;
+                    ensure!(us > 0, "{file} says the motor's period is 0 us");
+                    1_000_000.0 / us as f32
+                }
+                None => return Err(first),
+            },
+        };
         let click = match cfg.click {
             Some(id) => {
                 eprintln!("haptics {}: clicks with waveform {id}, ticks made for a motor swinging at {hz} Hz", path.display());
