@@ -123,42 +123,46 @@ jobs:
       - name: Read the stock build the recovery is made on
         id: stock
         run: tools/skyward-pack stock --config "devices/${{ matrix.device }}.toml" >> "$GITHUB_OUTPUT"
-      - name: Restore the stock recovery
-        id: cache
-        uses: actions/cache@v6
-        with:
-          path: stock/recovery.img
-          key: stock-recovery-${{ hashFiles(format('devices/{0}.toml', matrix.device)) }}-${{ steps.stock.outputs.recovery }}
-      # A configuration may name the package it takes the recovery out of, or
-      # a recovery image at hand. Either way only what the recovery partition
-      # takes is read, never the whole package, which is several gigabytes.
+      # A configuration that names a `path` wants the image beside itself,
+      # which is where the packer reads it from; a package is only where it
+      # is taken out of. Only the recovery partition's bytes are ever read of
+      # a package, never the whole thing, which is several gigabytes.
       - name: Take the recovery partition out of the stock package
-        if: steps.cache.outputs.cache-hit != 'true'
         env:
           DEVICE: ${{ matrix.device }}
           STOCK_RECOVERY: ${{ steps.stock.outputs.recovery }}
           STOCK_PACKAGE: ${{ steps.stock.outputs.package }}
         run: |
-          mkdir -p stock
-          if [ -n "$STOCK_PACKAGE" ]; then
-            python3 scripts/fetch-stock.py "$STOCK_PACKAGE" stock/recovery.img "$STOCK_RECOVERY"
-          else
-            tools/skyward-pack stock --config "devices/$DEVICE.toml" --out stock/recovery.img
+          C="devices/$DEVICE.toml"
+          WANT=$(sed -n 's/^path *= *"\([^"]*\)".*/\1/p' "$C" | head -1)
+          if [ -n "$WANT" ]; then
+            python3 scripts/fetch-stock.py "$STOCK_PACKAGE" "devices/$WANT" "$STOCK_RECOVERY"
           fi
       - name: Check the stock recovery
         env:
           RECOVERY: ${{ steps.stock.outputs.recovery }}
-        run: echo "$RECOVERY  stock/recovery.img" | sha256sum --check
+        run: |
+          C="devices/${{ matrix.device }}.toml"
+          WANT=$(sed -n 's/^path *= *"\([^"]*\)".*/\1/p' "$C" | head -1)
+          if [ -n "$WANT" ]; then
+            echo "$RECOVERY  devices/$WANT" | sha256sum --check
+            echo "STOCK_IMG=devices/$WANT" >> "$GITHUB_ENV"
+          else
+            mkdir -p stock
+            tools/skyward-pack stock --config "$C" --out stock/recovery.img
+            echo "$RECOVERY  stock/recovery.img" | sha256sum --check
+            echo "STOCK_IMG=stock/recovery.img" >> "$GITHUB_ENV"
+          fi
       - name: Pack the recovery
         id: pack
         env:
           DEVICE: ${{ matrix.device }}
-          STOCK: ${{ steps.stock.outputs.version }}
+          BUILD: ${{ steps.stock.outputs.version }}
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then version="$GITHUB_REF_NAME"; else version="${GITHUB_SHA::7}"; fi
-          name="skyward-$version-$DEVICE-$STOCK"
+          name="skyward-$version-$DEVICE-$BUILD"
           mkdir out
-          tools/skyward-pack recovery --stock stock/recovery.img --binary tools/skyward --system-init tools/system-init \
+          tools/skyward-pack recovery --stock "$STOCK_IMG" --binary tools/skyward --system-init tools/system-init \
             --config "devices/$DEVICE.toml" --font resources/fonts/MiSansVF.ttf --mono resources/fonts/KirkMono-Regular.ttf \
             --mono-license resources/fonts/KirkMono-OFL.txt --out "out/$name.img"
           echo "name=$name" >> "$GITHUB_OUTPUT"
