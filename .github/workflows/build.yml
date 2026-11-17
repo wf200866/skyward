@@ -134,7 +134,7 @@ jobs:
           STOCK_PACKAGE: ${{ steps.stock.outputs.package }}
         run: |
           C="devices/$DEVICE.toml"
-          WANT=$(sed -n 's/^path *= *"\([^"]*\)".*/\1/p' "$C" | head -1)
+          WANT=$(awk '/^\[stock\]/{s=1;next} /^\[/{s=0} s&&/^path *=/{gsub(/^path *= *"/,"");sub(/".*/,"");print;exit}' "$C")
           if [ -n "$WANT" ]; then
             python3 scripts/fetch-stock.py "$STOCK_PACKAGE" "devices/$WANT" "$STOCK_RECOVERY"
           fi
@@ -143,7 +143,7 @@ jobs:
           RECOVERY: ${{ steps.stock.outputs.recovery }}
         run: |
           C="devices/${{ matrix.device }}.toml"
-          WANT=$(sed -n 's/^path *= *"\([^"]*\)".*/\1/p' "$C" | head -1)
+          WANT=$(awk '/^\[stock\]/{s=1;next} /^\[/{s=0} s&&/^path *=/{gsub(/^path *= *"/,"");sub(/".*/,"");print;exit}' "$C")
           if [ -n "$WANT" ]; then
             echo "$RECOVERY  devices/$WANT" | sha256sum --check
             echo "STOCK_IMG=devices/$WANT" >> "$GITHUB_ENV"
