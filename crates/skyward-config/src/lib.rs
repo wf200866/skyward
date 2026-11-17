@@ -93,8 +93,16 @@ pub struct DeviceConfig {
 pub struct Stock {
     /// The build's version, such as OS4.0.4.0.XPACNXM.
     pub version: String,
-    /// Where the package is downloaded from, over HTTPS.
+    /// Where the package is downloaded from, over HTTPS. Empty when the
+    /// recovery is taken from `path` instead.
+    #[serde(default)]
     pub package: String,
+    /// A recovery image already at hand, laid out over its whole partition
+    /// and ending in its AVB footer, read instead of taking the partition
+    /// out of a package on a server. Relative paths are from the directory
+    /// the configuration is in.
+    #[serde(default)]
+    pub path: Option<String>,
     /// The recovery partition's SHA-256, in lowercase hex.
     pub recovery: String,
 }
