@@ -128,12 +128,23 @@ jobs:
         uses: actions/cache@v6
         with:
           path: stock/recovery.img
-          key: stock-recovery-${{ steps.stock.outputs.recovery }}
-      # Only what the recovery partition takes is read of the package,
-      # which is several gigabytes in all.
+          key: stock-recovery-${{ hashFiles(format('devices/{0}.toml', matrix.device)) }}-${{ steps.stock.outputs.recovery }}
+      # A configuration may name the package it takes the recovery out of, or
+      # a recovery image at hand. Either way only what the recovery partition
+      # takes is read, never the whole package, which is several gigabytes.
       - name: Take the recovery partition out of the stock package
         if: steps.cache.outputs.cache-hit != 'true'
-        run: tools/skyward-pack stock --config "devices/${{ matrix.device }}.toml" --out stock/recovery.img
+        env:
+          DEVICE: ${{ matrix.device }}
+          STOCK_RECOVERY: ${{ steps.stock.outputs.recovery }}
+          STOCK_PACKAGE: ${{ steps.stock.outputs.package }}
+        run: |
+          mkdir -p stock
+          if [ -n "$STOCK_PACKAGE" ]; then
+            python3 scripts/fetch-stock.py "$STOCK_PACKAGE" stock/recovery.img "$STOCK_RECOVERY"
+          else
+            tools/skyward-pack stock --config "devices/$DEVICE.toml" --out stock/recovery.img
+          fi
       - name: Check the stock recovery
         env:
           RECOVERY: ${{ steps.stock.outputs.recovery }}
