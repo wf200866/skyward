@@ -316,7 +316,16 @@ impl Phone {
                 Err(e) if e.kind() == ErrorKind::NotFound => continue,
                 Err(e) => return Err(e).with_context(|| format!("read {}", file.display())),
             };
-            let script = script::read(&text).with_context(|| format!("read {path}"))?;
+            // A vendor script init itself passes over, such as one commented
+            // out with a syntax init does not know, is passed over here too;
+            // the programs it would have described are not started.
+            let script = match script::read(&text) {
+                Ok(script) => script,
+                Err(e) => {
+                    eprintln!("skip {path}: {e:#}");
+                    continue;
+                }
+            };
             waiting.extend(script.imports.iter().filter_map(|import| self.expand(import)));
             self.actions.extend(script.actions);
             for mut program in script.programs {
