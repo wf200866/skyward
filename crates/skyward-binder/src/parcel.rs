@@ -3,7 +3,7 @@ use anyhow::{bail, Context, Result};
 /// The mark libbinder writes into every call header. Both ends have to agree
 /// on it: it tells apart the copies of libbinder a phone carries, and the one
 /// the recovery's own programs are built from is the recovery copy.
-const HEADER: i32 = i32::from_be_bytes(*b"RECO");
+const HEADER: i32 = i32::from_be_bytes(*b"SYST");
 
 /// Strict mode gathers violations rather than acting on them; a caller with
 /// no policy of its own still sets that bit.
@@ -312,7 +312,7 @@ mod tests {
         let mut r = Reader::new(p.bytes());
         assert_eq!(r.i32().unwrap(), i32::MIN, "strict mode gathers");
         assert_eq!(r.i32().unwrap(), -1, "no work source");
-        assert_eq!(r.i32().unwrap(), 0x5245_434f, "the recovery's mark, RECO");
+        assert_eq!(r.i32().unwrap(), 0x5359_5354, "the mark libbinder writes, SYST");
         assert_eq!(r.string().unwrap(), "a.b.IC");
         assert_eq!(r.here(), p.bytes().len(), "the header is all of it");
     }
