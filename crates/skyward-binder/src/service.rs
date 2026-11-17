@@ -8,7 +8,7 @@ use crate::status;
 use anyhow::{Context, Result};
 
 /// The directory every program registers with and looks things up in.
-const DIRECTORY: &str = "android.os.IServiceManager";
+const DIRECTORY: &str = "manager";
 
 /// What the directory numbers the methods it is asked by here. It numbers
 /// its methods in the order its interface declares them, and Android 16
