@@ -137,7 +137,11 @@ impl Backlight {
 /// their factory tests drive the panel to, on the backlight's own scale:
 /// the 13 Ultra's panels give that level as well, and it comes to the same
 /// half of their range as the normal maximum they give.
-const NORMAL_MAX: [(&str, &str); 3] = [
+const NORMAL_MAX: [(&str, &str); 5] = [
+    // OPPO's phones, this OnePlus among them, give it as their own property
+    // pair on the backlight's scale.
+    ("oplus,dsi-bl-normal-max-level", "qcom,mdss-dsi-bl-max-level"),
+    ("oplus,dsi-brightness-normal-max-level", "qcom,mdss-brightness-max-level"),
     ("mi,normal-max-brightness-clone", "mi,max-brightness-clone"),
     ("mi,max-brightness-normal", "qcom,mdss-dsi-bl-max-level"),
     ("mi,mdss-dsi-fac-bl-max-level", "qcom,mdss-dsi-bl-max-level"),
