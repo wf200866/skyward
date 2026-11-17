@@ -132,11 +132,16 @@ fn show_owner_storage() -> Result<()> {
 pub fn close() -> Result<()> {
     for at in [SDCARD, MOUNT] {
         if mount::is_mount_point(Path::new(at))? {
-            mount::umount(Path::new(at))?;
+            // A file still open, such as one the file manager shows, keeps a
+            // plain unmount from going through; taking the mount out of the
+            // tree lets init's shutdown unmount it.
+            if mount::umount(Path::new(at)).is_err() {
+                mount::umount_detach(Path::new(at))?;
+            }
         }
     }
     if dm::status(MAPPED)?.is_some() {
-        dm::remove(MAPPED)?;
+        let _ = dm::remove(MAPPED);
     }
     Ok(())
 }
