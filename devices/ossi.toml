@@ -5,6 +5,12 @@ model = "OnePlus Ace Pro"
 ab = true
 soc = { hans = "第一代骁龙®8+移动平台", hant = "Snapdragon® 8+ Gen 1 行動平台", en = "Snapdragon® 8+ Gen 1 Mobile Platform" }
 os_version_prop = "ro.build.version.oplusrom"
+# The stock recovery's USB setup carries adb; MTP beside it resets the port
+# on OnePlus phones, so leave it out.
+mtp = false
+# OnePlus's SELinux policy refuses the phone's own programs the files they
+# need inside a recovery.
+permissive = true
 
 [display]
 width = 1080
@@ -29,11 +35,11 @@ sources = ["vendor_boot", "vendor_dlkm", "vendor"]
 load = ["synaptics_tcm2"]
 
 # The vibration motor: Qualcomm's haptics driver, whose own waveform plays
-# nothing in a recovery. The motor swings at 171 Hz on this phone, which the
-# driver reads as it boots; clicks are built from samples at that frequency
-# instead.
+# nothing in a recovery. The driver leaves the frequency at nothing until
+# the motor is first played, and says the period instead.
 [haptics]
 resonance = "/sys/class/qcom-haptics/lra_frequency_hz"
+period = "/sys/class/qcom-haptics/t_lra_us"
 strength = { lightest = 0.25, strongest = 0.75 }
 
 # The firmware of the WLAN chip is on the modem partition, which the phone
@@ -61,6 +67,52 @@ oneshot = true
 user = "root"
 groups = ["root", "system", "wakelock", "graphics"]
 
+# The secure world's bridge to user space; without it keymint cannot use
+# any key. Its vendor binary runs on the VNDK 32 libraries.
+[[service]]
+path = "/vendor/bin/qseecomd"
+libraries = ["/apex/com.android.vndk.v32/lib64", "/vendor/lib64", "/system/lib64"]
+user = "root"
+groups = ["root", "drmrpc"]
+
+# The key service: decrypting the data partition rests on it. The vendor
+# binary links the installed system's libbinder_ndk, and the symbols it
+# uses are only in that system's libbinder and libc++, so the installed
+# system's lib64 comes before the VNDK's.
+[[service]]
+path = "/vendor/bin/hw/android.hardware.security.keymint-service-qti"
+libraries = [
+    "/vendor/lib64",
+    "/system/lib64",
+    "/apex/com.android.vndk.v32/lib64",
+]
+user = "system"
+groups = ["system", "drmrpc"]
+ready_service = "android.hardware.security.keymint.IKeyMintDevice/default"
+registers = [
+    "android.hardware.security.secureclock.ISecureClock/default",
+    "android.hardware.security.sharedsecret.ISharedSecret/default",
+]
+
+# The credential service: it checks the secret the lock screen's password
+# derives, and only then does keymint use the key it guards. It is a HIDL
+# service, registered with hwservicemanager, so its name is the interface
+# and then which of them it is.
+[[service]]
+path = "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti"
+libraries = ["/apex/com.android.vndk.v32/lib64", "/vendor/lib64", "/system/lib64"]
+user = "system"
+groups = ["system"]
+ready_hardware_service = "android.hardware.gatekeeper@1.0::IGatekeeper/default"
+
+# The slot switch (A/B).
+[[service]]
+path = "/vendor/bin/hw/android.hardware.boot@1.2-service"
+libraries = ["/apex/com.android.vndk.v32/lib64", "/vendor/lib64", "/system/lib64"]
+user = "root"
+groups = ["root"]
+ready_hardware_service = "android.hardware.boot@1.2::IBootControl/default"
+
 # WLAN: Qualcomm's QCA6490 on PCIe (qcom,cnss-qca6490@b0000000), driven by
 # qca_cld3_qca6490 over the cnss2 platform driver. Only the top of the chain
 # is named: modules.dep has the fifteen it rests on (qmi_helpers,
@@ -77,7 +129,7 @@ interface = "wlan0"
 supplicant = "/vendor/bin/hw/wpa_supplicant"
 libraries = ["/system/lib64", "/vendor/lib64"]
 service = "android.hardware.wifi.supplicant.ISupplicant/default"
-probe = "http://connect.rom.miui.com/generate_204"
+probe = "http://connectivitycheck.gstatic.com/generate_204"
 
 # The update server the stock updater asks.
 [update]
