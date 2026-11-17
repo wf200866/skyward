@@ -164,18 +164,19 @@ fn normal_max(max: u32) -> Result<u32> {
         .map(|e| e.map(|e| e.path().join(name)))
         .collect::<std::io::Result<Vec<_>>>()?
         .into_iter()
-        .find(|p| p.is_dir())
-        .ok_or_else(|| anyhow!("panel {name} is not in the device tree"))?;
+        .find(|p| p.is_dir());
+    // Panels whose driver leaves no node behind, as OnePlus's does, keep
+    // their whole range as the normal maximum.
+    let Some(node) = node else { return Ok(max) };
     let cell = |prop: &str| -> Result<u32> {
         let path = node.join(prop);
         let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
         let cell: [u8; 4] = bytes.as_slice().try_into().map_err(|_| anyhow!("{} is not one cell", path.display()))?;
         Ok(u32::from_be_bytes(cell))
     };
-    let (normal, full) = NORMAL_MAX
-        .iter()
-        .find(|(normal, _)| node.join(normal).exists())
-        .with_context(|| format!("panel {name} gives its normal maximum as none of {NORMAL_MAX:?}"))?;
+    let Some((normal, full)) = NORMAL_MAX.iter().find(|(normal, _)| node.join(normal).exists()) else {
+        return Ok(max);
+    };
     let (normal, full) = (cell(normal)?, cell(full)?);
     ensure!(normal > 0 && normal <= full, "panel {name}: normal maximum {normal} out of {full}");
     Ok((f64::from(max) * f64::from(normal) / f64::from(full)).round() as u32)
@@ -183,6 +184,9 @@ fn normal_max(max: u32) -> Result<u32> {
 
 /// Leave recovery for the chosen target.
 fn power(target: Target) -> Result<()> {
+    // Init unmounts what the recovery mounted before it acts; a /data that
+    // is still mounted would leave its shutdown waiting forever.
+    let _ = skyward_crypto::data::close();
     skyward_sys::power(match target {
         Target::System => Power::System,
         Target::Recovery => Power::Recovery,
@@ -1310,7 +1314,7 @@ impl<'a> Pages<'a> {
         let fastboot = first == Screen::Fastboot;
         let port_at = Instant::now();
         let mut transfer: Option<Transfer> = None;
-        if app.state.file_transfer {
+        if cfg.device.mtp && app.state.file_transfer {
             match Transfer::start(cfg, &info, app.state.time_zone) {
                 Ok(t) => transfer = Some(t),
                 Err(e) => {
