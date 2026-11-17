@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,28 +14,28 @@ pub fn source_dir(source: &str) -> Result<PathBuf> {
         "vendor_boot" => "/lib/modules",
         "vendor_dlkm" => "/vendor_dlkm/lib/modules",
         "vendor" => "/vendor/lib/modules",
-        "system_dlkm" => "/system_dlkm/flatten/lib/modules",
+        // Xiaomi keeps the kernel's modules under flatten; other phones,
+        // OnePlus among them, keep them directly under lib.
+        "system_dlkm" if Path::new("/system_dlkm/flatten/lib/modules").is_dir() => "/system_dlkm/flatten/lib/modules",
+        "system_dlkm" => "/system_dlkm/lib/modules",
         _ => bail!("unknown module source {source:?}"),
     }))
 }
 
 /// Load `names` (module names without `.ko`) with their dependencies. Each
 /// comes from the first of `dirs` that holds it, and its dependencies from
-/// that directory's modules.dep; a module the kernel already has counts as
+/// whichever of `dirs` holds them; a module the kernel already has counts as
 /// loaded. Returns the files loaded, dependencies first.
 pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
+    let graph = parse_all(dirs)?;
     let mut loaded = Vec::new();
     for name in names {
         let file = format!("{name}.ko");
-        let dir = dirs
-            .iter()
-            .find(|d| d.join(&file).is_file())
-            .ok_or_else(|| anyhow!("{file} is in none of {dirs:?}"))?;
-        let graph = parse_dep(dir)?;
+        ensure!(graph.resolve_path(&file).is_some(), "{file} is in none of {dirs:?}");
         for m in graph.load_order(std::slice::from_ref(&file)) {
             let path = graph
                 .resolve_path(&m)
-                .ok_or_else(|| anyhow!("{m} is listed in {}/modules.dep but missing", dir.display()))?;
+                .ok_or_else(|| anyhow!("{m} is listed in a modules.dep but missing from all of {dirs:?}"))?;
             insmod(&path, "")?;
             loaded.push(path);
         }
@@ -50,6 +50,11 @@ pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
 #[derive(Debug, Default)]
 pub struct ModuleGraph {
     pub base: PathBuf,
+    /// Every folder the modules may come from, in the order they are
+    /// searched: a vendor's modules.dep names the kernel's own modules by
+    /// the path the running system mounts them at, not where a recovery
+    /// mounts them.
+    pub dirs: Vec<PathBuf>,
     pub deps: BTreeMap<String, Vec<String>>,
 }
 
@@ -71,7 +76,28 @@ pub fn parse_dep(base: impl AsRef<Path>) -> Result<ModuleGraph> {
         let ds = rhs.split_whitespace().map(basename).collect();
         deps.insert(name, ds);
     }
-    Ok(ModuleGraph { base, deps })
+    Ok(ModuleGraph { base: base.clone(), dirs: vec![base], deps })
+}
+
+/// A graph over every folder's modules.dep, so that a dependency named in
+/// one folder's file is found in whichever folder holds it.
+pub fn parse_all(dirs: &[PathBuf]) -> Result<ModuleGraph> {
+    let mut graph = ModuleGraph { base: dirs.first().cloned().unwrap_or_default(), dirs: dirs.to_vec(), deps: BTreeMap::new() };
+    for dir in dirs {
+        let dep_path = dir.join("modules.dep");
+        let Ok(text) = fs::read_to_string(&dep_path) else { continue };
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let Some((lhs, rhs)) = line.split_once(':') else { continue };
+            let name = basename(lhs.trim());
+            let ds: Vec<String> = rhs.split_whitespace().map(basename).collect();
+            graph.deps.entry(name).or_insert(ds);
+        }
+    }
+    Ok(graph)
 }
 
 fn basename(p: &str) -> String {
@@ -112,11 +138,18 @@ impl ModuleGraph {
     }
 
     pub fn resolve_path(&self, module: &str) -> Option<PathBuf> {
-        let direct = self.base.join(module);
-        if direct.exists() {
-            return Some(direct);
+        for dir in &self.dirs {
+            let direct = dir.join(module);
+            if direct.is_file() {
+                return Some(direct);
+            }
         }
-        find_file(&self.base, module)
+        for dir in &self.dirs {
+            if let Some(found) = find_file(dir, module) {
+                return Some(found);
+            }
+        }
+        None
     }
 }
 
@@ -173,7 +206,7 @@ mod tests {
         deps.insert("a.ko".to_string(), vec!["b.ko".to_string()]);
         deps.insert("b.ko".to_string(), vec!["c.ko".to_string()]);
         deps.insert("c.ko".to_string(), vec![]);
-        let g = ModuleGraph { base: PathBuf::new(), deps };
+        let g = ModuleGraph { base: PathBuf::new(), dirs: Vec::new(), deps };
         let order = g.load_order(&["a.ko".to_string()]);
         assert_eq!(order, vec!["c.ko", "b.ko", "a.ko"]);
     }
