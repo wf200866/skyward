@@ -2,7 +2,7 @@
 //! recovery: the libraries their partitions were built against, and a
 //! service directory that knows the phone describes them.
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -292,13 +292,23 @@ fn register_again(registered: &[(String, String)]) -> Result<()> {
         skyward_sys::set_prop("ctl.start", service).with_context(|| format!("have init start {service} again"))?;
     }
     let binder = skyward_binder::driver::Binder::open()?;
-    let until = Instant::now() + REGISTER_TIMEOUT;
     for (name, service) in registered {
+        let until = Instant::now() + REGISTER_TIMEOUT;
+        let mut missing = false;
         while skyward_binder::service::find(&binder, name)?.is_none() {
-            ensure!(Instant::now() < until, "{name} has not registered again since init started {service} again");
+            if Instant::now() >= until {
+                // A service the recovery does not use may not come back
+                // in a recovery, as OnePlus's health service does not; the
+                // programs that use the keys start after this either way.
+                skyward_sys::kmsg(&format!("{name} did not register again from {service}; going on without it"))?;
+                missing = true;
+                break;
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
-        skyward_sys::kmsg(&format!("{name} registered again from {service}"))?;
+        if !missing {
+            skyward_sys::kmsg(&format!("{name} registered again from {service}"))?;
+        }
     }
     Ok(())
 }
