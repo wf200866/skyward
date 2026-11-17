@@ -1,0 +1,103 @@
+[device]
+codename = "ossi"
+brand = "OnePlus"
+model = "OnePlus Ace Pro"
+ab = true
+soc = { hans = "第一代骁龙®8+移动平台", hant = "Snapdragon® 8+ Gen 1 行動平台", en = "Snapdragon® 8+ Gen 1 Mobile Platform" }
+os_version_prop = "ro.build.version.oplusrom"
+
+[display]
+width = 1080
+height = 2412
+density = 480
+diagonal = 6.7
+# rounded_corner_radius in the system's overlay; the stock settings round a
+# page's corners to this as it slides in.
+corner_radius = 120
+
+[modules]
+sources = ["vendor_boot", "vendor_dlkm", "vendor"]
+# The touchscreen: Synaptics S3910 over SPI behind OnePlus's TCM layer.
+load = ["synaptics_tcm2"]
+
+# OnePlus's touch layer resets the controller as it connects, and the
+# controller comes back sending only raw frames, which the system's touch
+# algorithm turns into touches. A recovery runs none of that, so told
+# through OnePlus's own layer the driver has the controller report
+# positions itself.
+[touch]
+writes = [{ path = "/proc/touchpanel/report_rate", value = "1" }]
+
+# The firmware of the WLAN chip is on the modem partition, which the phone
+# mounts at /vendor/firmware_mnt and its own recovery leaves unmounted.
+[firmware]
+partition = "modem"
+
+# The persist partition, which the phone mounts at /mnt/vendor/persist and
+# its own recovery leaves unmounted. The secure world keeps its own files
+# there, through a listener qseecomd registers: among them what the key
+# service needs to use a key that cannot be rolled back, such as the one
+# guarding each user's secret.
+[partitions]
+mounted = ["persist"]
+
+# What the phone's own init runs once the system has finished starting, as
+# the user and in the groups its init script on the phone gives it.
+[[service]]
+path = "/vendor/bin/sh"
+args = ["/vendor/bin/init.kernel.post_boot.sh"]
+libraries = ["/system/lib64", "/vendor/lib64"]
+oneshot = true
+user = "root"
+groups = ["root", "system", "wakelock", "graphics"]
+
+# WLAN: Qualcomm's WCN6750-class part driven by qca6490 over the cnss2
+# platform driver. Once fs_ready is written, cnss2 powers the chip up and
+# loads its firmware from the modem partition, and wlan0 appears.
+[wlan]
+modules = ["qca6490"]
+writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+firmware = [
+    { name = "wlan/qca_cld/qca6490/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/qca6490/WCNSS_qcom_cfg.ini" },
+]
+interface = "wlan0"
+supplicant = "/vendor/bin/hw/wpa_supplicant"
+libraries = ["/system/lib64", "/vendor/lib64"]
+service = "android.hardware.wifi.supplicant.ISupplicant/default"
+probe = "http://connect.rom.miui.com/generate_204"
+
+# The update server the stock updater asks.
+[update]
+server = "https://component-ota-cn.allawntech.com/update/v6"
+
+# The stock build the recovery is made on. The recovery image is kept beside
+# this file, laid out over its whole partition and ending in its AVB footer.
+[stock]
+version = "PMA110_16.0.8.304(CN01)"
+path = "ossi-recovery.img"
+recovery = "76f40a2e7c9a42b22bccc292c5e12315b9668cdb793176d540777f39877666d0"
+
+# The partitions a backup of the baseband and EFS takes: the baseband's
+# settings, with the IMEI, and the sensors' calibration.
+[backup]
+efs = ["modemst1", "modemst2", "fsg", "fsc", "persist"]
+data_skipped = [
+    "vendor/tzstorage",
+    "vendor/qtee",
+    "vendor/mitee",
+    "vendor/goodix",
+    "vendor/fingerprint",
+    "vendor/fpdata",
+]
+
+# Where the phone's own programs keep logs in the data partition.
+[wipe]
+logs = [
+    "/data/persist_log",
+    "/data/vendor/diag",
+    "/data/vendor/log",
+    "/data/vendor/ramdump",
+    "/data/vendor/ssrdump",
+    "/data/vendor/tombstones",
+    "/data/vendor/wlan_logs",
+]
