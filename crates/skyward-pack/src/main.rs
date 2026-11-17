@@ -176,7 +176,7 @@ fn main() -> Result<()> {
             let stock = skyward_config::DeviceConfig::load(&config)?.stock.with_context(|| format!("{} names no stock build", config.display()))?;
             println!("version={}\npackage={}\nrecovery={}", stock.version, stock.package, stock.recovery);
             match out {
-                Some(out) => take_stock_recovery(&stock, &out),
+                Some(out) => take_stock_recovery(&stock, &config, &out),
                 None => Ok(()),
             }
         }
@@ -194,9 +194,28 @@ const RECOVERY: &str = "recovery";
 /// Take the recovery partition out of the stock build's full update package
 /// on its server, reading only what that partition takes of it, and write it
 /// to `out` once its SHA-256 is the one the configuration names.
-fn take_stock_recovery(stock: &skyward_config::Stock, out: &Path) -> Result<()> {
+fn take_stock_recovery(stock: &skyward_config::Stock, config: &Path, out: &Path) -> Result<()> {
     let parent = out.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent).with_context(|| format!("make {}", parent.display()))?;
+
+    // A recovery image already at hand is read as it lies, laid out over its
+    // whole partition, and only its sum is held against the configuration.
+    if let Some(path) = &stock.path {
+        let dir = config.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        let at = dir.join(path);
+        let image = std::fs::read(&at).with_context(|| format!("read {}", at.display()))?;
+        let sum = hex::encode(Sha256::digest(&image));
+        ensure!(
+            sum == stock.recovery,
+            "{} has the SHA-256 {sum}, where the configuration names {}",
+            at.display(),
+            stock.recovery
+        );
+        std::fs::copy(&at, out).with_context(|| format!("copy {} to {}", at.display(), out.display()))?;
+        println!("took {} as it lies ({} bytes), its SHA-256 the one the configuration names", at.display(), image.len());
+        return Ok(());
+    }
+
     // Taken out beside where it goes, so it is moved there whole.
     let work = tempfile::Builder::new().prefix(".stock").tempdir_in(parent).with_context(|| format!("make a folder in {}", parent.display()))?;
     let payload = unpayload::Payload::open_url(&stock.package).with_context(|| format!("open {}", stock.package))?;
