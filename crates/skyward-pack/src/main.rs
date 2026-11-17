@@ -134,6 +134,26 @@ fn main() -> Result<()> {
             if let Some(e) = rd.entries.iter().find(|e| e.name == "FFiles" || e.name.starts_with("twres")) {
                 anyhow::bail!("{} holds {}, which is not a stock recovery", stock.display(), e.name);
             }
+            // OnePlus's recovery init starts its own phoenix_recovery
+            // service. The same script also defines the recovery service
+            // this image replaces, so have init start that instead.
+            if let Some(init) = rd.entries.iter_mut().find(|e| e.name == "system/etc/init/hw/init.rc") {
+                let before = b"start phoenix_recovery";
+                let after = b"start recovery";
+                if let Some(at) = init.data.windows(before.len()).position(|w| w == before) {
+                    init.data.splice(at..at + before.len(), after.iter().copied());
+                    println!("init.rc: the recovery service is started in place of phoenix_recovery");
+                }
+                // phoenix_recovery has no class, so `class_start default`
+                // would start it beside the recovery service; make it
+                // something only a name starts.
+                let phoenix = b"service phoenix_recovery /system/bin/phoenix_recovery";
+                if let Some(at) = init.data.windows(phoenix.len()).position(|w| w == phoenix) {
+                    let at = at + phoenix.len();
+                    init.data.splice(at..at, b"\n    disabled".iter().copied());
+                    println!("init.rc: phoenix_recovery no longer starts with the default class");
+                }
+            }
             let read = |p: &PathBuf| std::fs::read(p).with_context(|| format!("read {}", p.display()));
             skyward_config::DeviceConfig::load(&config)?;
             rd.replace(paths::RECOVERY, read(&binary)?)?;
