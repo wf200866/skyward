@@ -750,12 +750,13 @@ fn recovery() -> Result<()> {
         std::fs::set_permissions(skyward_sys::RUN, std::fs::Permissions::from_mode(0o755))
             .with_context(|| format!("open {} to the recovery's other users", skyward_sys::RUN))?;
         skyward_sys::keep_log(Path::new(skyward_sys::LOG))?;
-        // A recovery that ended with a function of its own in the port took
-        // the port with it; going through "none" takes that function off.
-        if skyward_sys::prop("sys.usb.state").is_some_and(|s| s != "adb") {
-            skyward_sys::usb::set("none", std::time::Duration::from_secs(5))?;
+        // Ask for adb without taking the port down first: some phones'
+        // USB setups do not come back from "none" inside a recovery. A
+        // port that does not take it is left as init set it up, and the
+        // recovery still runs.
+        if let Err(e) = skyward_sys::usb::set("adb", std::time::Duration::from_secs(5)) {
+            skyward_sys::kmsg(&format!("the port did not take adb at once: {e:#}"))?;
         }
-        skyward_sys::set_prop("sys.usb.config", "adb")?;
         let misc = bcb::misc();
         let message = bcb::read(&misc)?;
         let request = message.request();
@@ -763,6 +764,13 @@ fn recovery() -> Result<()> {
             bcb::clear(&misc)?;
         }
         let cfg = DeviceConfig::load(Path::new("/").join(ramdisk::CONFIG))?;
+        // OnePlus's policy refuses the phone's own programs files they need
+        // inside a recovery, such as the loop worker's; their systems run
+        // the recovery permissive for the same reason.
+        if cfg.device.permissive {
+            std::fs::write("/sys/fs/selinux/enforce", "0").context("put SELinux in permissive mode")?;
+            skyward_sys::kmsg("SELinux is permissive")?;
+        }
         skyward_sys::kmsg(&format!(
             "{} {} recovery up, misc command {:?} args {:?}, asking for {:?}",
             cfg.device.codename,
