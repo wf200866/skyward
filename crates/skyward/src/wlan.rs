@@ -40,7 +40,7 @@ const WIFI: u32 = 1010;
 
 /// How long the driver may take to make its interface, the chip's firmware
 /// loading meanwhile.
-const INTERFACE_WAIT: Duration = Duration::from_secs(20);
+const INTERFACE_WAIT: Duration = Duration::from_secs(45);
 
 /// How long the supplicant may take to open its control socket.
 const SOCKET_WAIT: Duration = Duration::from_secs(10);
@@ -632,11 +632,39 @@ fn bring_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
             skyward_sys::kmsg(&format!("loaded {}", path.display()))?;
         }
         for w in &cfg.writes {
+            // A driver makes its switches as its module loads, which may be
+            // a moment after the load returns.
+            if skyward_sys::wait_file(Path::new(&w.path), Duration::from_secs(5)).is_err() {
+                skyward_sys::kmsg(&format!("{} is not there to write {} to", w.path, w.value))?;
+                continue;
+            }
             fs::write(&w.path, &w.value).with_context(|| format!("write {} to {}", w.value, w.path))?;
         }
         let until = Instant::now() + INTERFACE_WAIT;
         while !net.exists() {
             ensure!(Instant::now() < until, "the driver made no {} in {} seconds", cfg.interface, INTERFACE_WAIT.as_secs());
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    if cfg.unblock {
+        // The rfkill switches are made as the interface is, and may come a
+        // moment after it; set_up refuses while any still blocks.
+        let dir = Path::new("/sys/class/rfkill");
+        let until = Instant::now() + Duration::from_secs(5);
+        loop {
+            let mut found = false;
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let state = entry.path().join("state");
+                    if state.exists() {
+                        found = true;
+                        let _ = fs::write(&state, "0");
+                    }
+                }
+            }
+            if found || Instant::now() >= until {
+                break;
+            }
             thread::sleep(Duration::from_millis(100));
         }
     }
