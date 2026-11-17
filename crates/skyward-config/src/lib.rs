@@ -134,6 +134,11 @@ pub struct Wlan {
     /// which the directory takes only from a program the running system
     /// describes.
     pub service: String,
+    /// Whether the driver leaves the radio blocked until its firmware is
+    /// up, as OnePlus's does: the rfkill switches are unblocked once the
+    /// interface has been made.
+    #[serde(default)]
+    pub unblock: bool,
     /// The page the stock system asks over plain HTTP to tell whether a
     /// network reaches the internet, which answers 204 with nothing.
     pub probe: String,
@@ -222,6 +227,11 @@ pub struct Haptics {
     /// The file the driver says the motor's resonant frequency in, in
     /// tenths of a hertz whatever its label.
     pub resonance: String,
+    /// The file the driver says the motor's period in, in microseconds,
+    /// where it leaves the frequency at nothing until the motor is first
+    /// played, as OnePlus's does.
+    #[serde(default)]
+    pub period: Option<String>,
     pub strength: Strength,
 }
 
@@ -279,6 +289,16 @@ pub struct Device {
     /// System property that carries the vendor OS version.
     #[serde(default = "default_os_version_prop")]
     pub os_version_prop: String,
+    /// Whether the port carries file transfer beside adb. Some phones' USB
+    /// setups cannot enumerate it together with adb, and their configuration
+    /// leaves it out.
+    #[serde(default = "default_true")]
+    pub mtp: bool,
+    /// Whether SELinux is put in permissive mode before the phone's own
+    /// programs start, as OnePlus's policy refuses some of them the files
+    /// they need inside a recovery.
+    #[serde(default)]
+    pub permissive: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -549,6 +569,9 @@ impl DeviceConfig {
         if let Some(haptics) = &cfg.haptics {
             let file = &haptics.resonance;
             ensure!(Path::new(file).is_absolute(), "[haptics] resonance: {file} is not an absolute path");
+            if let Some(period) = &haptics.period {
+                ensure!(Path::new(period).is_absolute(), "[haptics] period: {period} is not an absolute path");
+            }
             let Strength { lightest, strongest } = haptics.strength;
             ensure!(
                 0.0 < lightest && lightest < strongest && strongest <= 1.0,
