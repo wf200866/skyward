@@ -233,6 +233,11 @@ pub fn publish_descriptions(wanted: &[String]) -> Result<()> {
     // these. One an earlier run of the recovery service had start again
     // knows them already, and is left with what has registered with it
     // since.
+    // The service directory may not have started yet: on OnePlus phones its
+    // init script never starts it, and the recovery runs before the boot
+    // actions that would. Nothing registers with a directory that is not
+    // answering, so wait for it here rather than give up on the keys.
+    wait_for_directory()?;
     let binder = skyward_binder::driver::Binder::open()?;
     // The first it does not know described settles that it starts again.
     let mut unknown = false;
@@ -339,6 +344,26 @@ fn say_framework(dir: &Path) -> Result<usize> {
         }
     }
     Ok(rewritten)
+}
+
+/// Wait for the service directory to answer, starting it where the phone's
+/// init script left it out. A directory that never comes back leaves the
+/// keys unopened, so the wait is bounded.
+fn wait_for_directory() -> Result<()> {
+    if crate::services::reachable() {
+        return Ok(());
+    }
+    if crate::services::running(DIRECTORY_PROGRAM).is_none() {
+        skyward_sys::set_prop("ctl.start", DIRECTORY_SERVICE).context("start the service directory")?;
+    }
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < until {
+        if crate::services::reachable() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    anyhow::bail!("the service directory did not answer")
 }
 
 /// Wait until the service directory is a new process and takes calls
